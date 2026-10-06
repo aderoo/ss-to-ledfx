@@ -62,6 +62,18 @@ SoundSwitch colour channels drive the effect colour while that scene is running:
   saved colours), and updates are rate-limited (default ~25/sec).
 - Leave the box unticked to let the scene keep full control of its colours.
 
+### White-out (full-on blinder)
+
+A global **White-out** toggle (off by default). When enabled, if the dimmer
+(ch 1) **and** all RGBW channels (ch 2–5) are at or above the white-out level
+(default 255), every strip snaps to solid white — regardless of its effect or
+the per-program override. This covers all effects, including multi-band ones
+(Scroll/Energy) and image effects, by temporarily switching each strip to Single
+Color white. When the channels drop back below the level, each strip's previous
+effect (and transition time) is restored.
+
+Build it in SoundSwitch as a cue that drives channels 1–5 to full.
+
 Strobe (ch 7), auto-program speed (ch 9) and dimmer-smoothing (ch 14) remain
 phase-2 TODOs.
 

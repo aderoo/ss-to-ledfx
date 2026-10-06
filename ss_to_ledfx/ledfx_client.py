@@ -123,6 +123,15 @@ class LedFxClient:
             reason = body.get("payload", {}).get("reason", body)
             raise LedFxError(f"set_effect({virtual_id}): {reason}")
 
+    async def clear_effect(self, virtual_id: str) -> None:
+        """Remove the active effect from a virtual (DELETE /effects)."""
+        body = await self._request(
+            "DELETE", f"/api/virtuals/{virtual_id}/effects"
+        )
+        if isinstance(body, dict) and body.get("status") == "failed":
+            reason = body.get("payload", {}).get("reason", body)
+            raise LedFxError(f"clear_effect({virtual_id}): {reason}")
+
     async def set_global_brightness(self, value: float) -> None:
         value = max(0.0, min(1.0, float(value)))
         body = await self._request(

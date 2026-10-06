@@ -77,6 +77,12 @@ class Config:
     control_scenes: bool = True
     control_color: bool = True
 
+    # White-out: when the dimmer (ch1) and all RGBW channels (ch2-5) are at
+    # or above white_out_threshold, force every strip to solid white (replacing
+    # its effect), then restore effects when the condition clears.
+    white_out: bool = False
+    white_out_threshold: int = 255
+
     # --- persistence -----------------------------------------------------
 
     _path: Path = field(default=DEFAULT_CONFIG_PATH, repr=False, compare=False)
@@ -127,6 +133,8 @@ class Config:
             "control_brightness",
             "control_scenes",
             "control_color",
+            "white_out",
+            "white_out_threshold",
         }
         for key in scalar:
             if key in data:
@@ -148,6 +156,8 @@ class Config:
             "control_brightness": self.control_brightness,
             "control_scenes": self.control_scenes,
             "control_color": self.control_color,
+            "white_out": self.white_out,
+            "white_out_threshold": self.white_out_threshold,
         }
 
     def save(self) -> None:

@@ -81,6 +81,11 @@ class Bridge:
         # override colour must be pushed again even if it hasn't changed.
         self._force_color_resend = False
 
+        # White-out state. Snapshot captures each virtual's effect + transition
+        # so they can be restored when the white-out condition clears.
+        self._whiteout_active = False
+        self._whiteout_snapshot: dict[str, dict] = {}
+
         # Known scene IDs fetched from LedFx, for validation / warnings.
         self._known_scenes: set[str] = set()
 
@@ -161,6 +166,7 @@ class Bridge:
             asyncio.create_task(self._scene_worker(), name="scene_worker"),
             asyncio.create_task(self._brightness_worker(), name="brightness_worker"),
             asyncio.create_task(self._color_worker(), name="color_worker"),
+            asyncio.create_task(self._whiteout_worker(), name="whiteout_worker"),
         ]
 
     async def stop(self) -> None:
@@ -192,7 +198,7 @@ class Bridge:
         tick = 0.01  # 10 ms
         while self._running:
             await asyncio.sleep(tick)
-            if not self._config.control_scenes:
+            if not self._config.control_scenes or self._whiteout_active:
                 continue
 
             program = program_from_value(self._channels[CH_PROGRAM])
@@ -264,7 +270,11 @@ class Bridge:
         while self._running:
             rate = max(1.0, float(self._config.color_max_rate_hz))
             await asyncio.sleep(1.0 / rate)
-            if not self._config.control_color or not self._color_override_active():
+            if (
+                not self._config.control_color
+                or not self._color_override_active()
+                or self._whiteout_active
+            ):
                 # Reset so re-enabling (or a new scene) re-sends the colour.
                 self._applied_color = None
                 continue
@@ -292,6 +302,78 @@ class Bridge:
                     _LOGGER.debug("Colour update on %s failed: %s", vid, err)
             self._applied_color = target
 
+    async def _whiteout_worker(self) -> None:
+        """Latch every strip to solid white while ch1-5 are all at full."""
+        while self._running:
+            await asyncio.sleep(0.02)  # 50 Hz
+            if not self._config.white_out:
+                if self._whiteout_active:
+                    await self._exit_whiteout()
+                continue
+
+            thr = self._config.white_out_threshold
+            full = all(
+                self._channels[c] >= thr
+                for c in (CH_DIMMER, CH_RED, CH_GREEN, CH_BLUE, CH_WHITE)
+            )
+            if full and not self._whiteout_active:
+                await self._enter_whiteout()
+            elif not full and self._whiteout_active:
+                await self._exit_whiteout()
+
+    async def _enter_whiteout(self) -> None:
+        try:
+            virtuals = await self._ledfx.get_virtuals()
+        except LedFxError as err:
+            _LOGGER.debug("White-out: could not read virtuals: %s", err)
+            return
+        snapshot: dict[str, dict] = {}
+        for vid, info in virtuals.items():
+            effect = info.get("effect") or {}
+            etype = effect.get("type")
+            snapshot[vid] = {
+                "effect": (
+                    {"type": etype, "config": dict(effect.get("config") or {})}
+                    if etype
+                    else None
+                ),
+                "transition_time": info.get("config", {}).get("transition_time"),
+            }
+        self._whiteout_snapshot = snapshot
+        self._whiteout_active = True
+        for vid in snapshot:
+            try:
+                # Instant: a blinder should snap, not fade.
+                await self._ledfx.set_virtual_config(vid, {"transition_time": 0})
+                await self._ledfx.set_effect(vid, "singleColor", {"color": "#ffffff"})
+            except LedFxError as err:
+                _LOGGER.debug("White-out on %s failed: %s", vid, err)
+        _LOGGER.info("White-out ON (%d strips)", len(snapshot))
+
+    async def _exit_whiteout(self) -> None:
+        snapshot = self._whiteout_snapshot
+        self._whiteout_active = False
+        self._whiteout_snapshot = {}
+        for vid, snap in snapshot.items():
+            try:
+                tt = snap.get("transition_time")
+                if tt is not None:
+                    await self._ledfx.set_virtual_config(vid, {"transition_time": tt})
+                effect = snap.get("effect")
+                if effect and effect.get("type"):
+                    await self._ledfx.set_effect(
+                        vid, effect["type"], effect["config"]
+                    )
+                else:
+                    await self._ledfx.clear_effect(vid)
+            except LedFxError as err:
+                _LOGGER.debug("White-out restore on %s failed: %s", vid, err)
+        # Re-apply per-program colour override after the restore.
+        self._applied_color = None
+        self._force_color_resend = True
+        await self.refresh_color_targets()
+        _LOGGER.info("White-out OFF - restored %d strips", len(snapshot))
+
     # --- status for the web UI ------------------------------------------
 
     def status(self) -> dict:
@@ -307,4 +389,6 @@ class Bridge:
             "control_scenes": self._config.control_scenes,
             "control_brightness": self._config.control_brightness,
             "control_color": self._config.control_color,
+            "white_out": self._config.white_out,
+            "whiteout_active": self._whiteout_active,
         }
