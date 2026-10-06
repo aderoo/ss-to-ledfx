@@ -302,7 +302,7 @@ class Bridge:
             self._applied_color = target
 
     async def _whiteout_worker(self) -> None:
-        """Latch every strip to solid white while ch1-5 are all at full."""
+        """Jump to the white-out program's scene while ch1-5 are all at full."""
         while self._running:
             await asyncio.sleep(0.02)  # 50 Hz
             if not self._config.white_out:
@@ -310,15 +310,19 @@ class Bridge:
                     await self._exit_whiteout()
                 continue
 
-            thr = self._config.white_out_threshold
-            full = all(
-                self._channels[c] >= thr
-                for c in (CH_DIMMER, CH_RED, CH_GREEN, CH_BLUE, CH_WHITE)
-            )
+            full = self._whiteout_condition()
             if full and not self._whiteout_active:
                 await self._enter_whiteout()
             elif not full and self._whiteout_active:
                 await self._exit_whiteout()
+
+    def _whiteout_condition(self) -> bool:
+        """True when ch1 (dimmer) and ch2-5 (RGBW) are all at/above the level."""
+        thr = self._config.white_out_threshold
+        return all(
+            self._channels[c] >= thr
+            for c in (CH_DIMMER, CH_RED, CH_GREEN, CH_BLUE, CH_WHITE)
+        )
 
     async def _enter_whiteout(self) -> None:
         self._whiteout_active = True
@@ -367,4 +371,11 @@ class Bridge:
             "control_color": self._config.control_color,
             "white_out": self._config.white_out,
             "whiteout_active": self._whiteout_active,
+            # Live diagnostics so the UI can show why white-out does/doesn't fire.
+            "whiteout_condition": self._whiteout_condition(),
+            "white_out_program": self._config.white_out_program,
+            "white_out_scene": self._scene_for_program(
+                self._config.white_out_program
+            ),
+            "white_out_threshold": self._config.white_out_threshold,
         }

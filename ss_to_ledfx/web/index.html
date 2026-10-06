@@ -169,7 +169,14 @@ async function pollStatus(){
       pill("Colour", b.color_override_active ? (b.color || "scene default") : "off",
            b.color_override_active ? "ok" : null),
     ];
-    if (b.whiteout_active) pills.push(pill("WHITE-OUT", "active", "warn"));
+    if (b.white_out) {
+      let wtxt, wstate;
+      if (b.whiteout_active) { wtxt = "ACTIVE → prog " + b.white_out_program; wstate = "warn"; }
+      else if (!b.white_out_scene) { wtxt = "no scene for program " + b.white_out_program; wstate = "bad"; }
+      else if (b.whiteout_condition) { wtxt = "triggering…"; wstate = "warn"; }
+      else { wtxt = "armed (prog " + b.white_out_program + " = " + b.white_out_scene + ", ≥" + b.white_out_threshold + ")"; wstate = "ok"; }
+      pills.push(pill("White-out", wtxt, wstate));
+    }
     el("status-pills").innerHTML = pills.join("");
     renderChannels(b.channels, b.program);
   }catch(e){
