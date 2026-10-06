@@ -63,6 +63,11 @@ class Config:
     # (<= 10). A scene ID switches to that scene instead.
     no_function_scene: str | None = None
 
+    # Fallback program used when channel 8 doesn't resolve to a configured
+    # scene (an unmapped program, or "no function" with no no_function_scene).
+    # 0 disables the fallback (the bridge then holds the current scene).
+    default_program: int = 1
+
     scene_debounce_ms: int = 100
     brightness_max_rate_hz: float = 25.0
     color_max_rate_hz: float = 40.0
@@ -128,6 +133,7 @@ class Config:
             "scenes",
             "color_override",
             "no_function_scene",
+            "default_program",
             "scene_debounce_ms",
             "brightness_max_rate_hz",
             "color_max_rate_hz",
@@ -152,6 +158,7 @@ class Config:
             "scenes": list(self.scenes),
             "color_override": list(self.color_override),
             "no_function_scene": self.no_function_scene,
+            "default_program": self.default_program,
             "scene_debounce_ms": self.scene_debounce_ms,
             "brightness_max_rate_hz": self.brightness_max_rate_hz,
             "color_max_rate_hz": self.color_max_rate_hz,

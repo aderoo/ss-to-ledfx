@@ -94,6 +94,8 @@
         <input id="s-colortrans" type="number" min="0" max="5" step="0.1">
         <label>"No function" (ch8 ≤ 10) scene — blank = hold current</label>
         <select id="s-nofunc"></select>
+        <label>Default program when ch8 is unmapped (0 = hold)</label>
+        <input id="s-defprog" type="number" min="0" max="25">
       </div>
     </div>
     <div class="toggle"><input type="checkbox" id="s-scenes"><label style="margin:0">Control scenes (channel 8)</label></div>
@@ -210,6 +212,7 @@ function fillSettingsForm(){
   el("s-colorrate").value = settings.color_max_rate_hz;
   el("s-colortrans").value = settings.color_transition_time;
   el("s-nofunc").innerHTML = optionList(settings.no_function_scene || "", true);
+  el("s-defprog").value = settings.default_program;
   el("s-scenes").checked = settings.control_scenes;
   el("s-bright").checked = settings.control_brightness;
   el("s-color").checked = settings.control_color;
@@ -244,6 +247,7 @@ function collectSettings(){
     color_max_rate_hz: parseFloat(el("s-colorrate").value),
     color_transition_time: parseFloat(el("s-colortrans").value),
     no_function_scene: el("s-nofunc").value || null,
+    default_program: parseInt(el("s-defprog").value,10),
     control_scenes: el("s-scenes").checked,
     control_brightness: el("s-bright").checked,
     control_color: el("s-color").checked,

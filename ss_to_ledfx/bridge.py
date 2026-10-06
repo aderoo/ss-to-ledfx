@@ -193,15 +193,26 @@ class Bridge:
 
     # --- mapping ---------------------------------------------------------
 
-    def _scene_for_program(self, program: int | None) -> str | None:
-        """Resolve the scene ID a program should activate (or None to hold)."""
+    def _direct_scene_for_program(self, program: int | None) -> str | None:
+        """The scene directly mapped to a program, without any fallback."""
         if program is None:
-            # "No function": hold current scene, unless an idle scene is set.
+            # "No function" (<= 10).
             return self._config.no_function_scene or None
         idx = program - 1
         if 0 <= idx < len(self._config.scenes):
-            scene_id = self._config.scenes[idx]
-            return scene_id or None
+            return self._config.scenes[idx] or None
+        return None
+
+    def _scene_for_program(self, program: int | None) -> str | None:
+        """Resolve the scene a program should activate, falling back to the
+        default program when channel 8 doesn't map to a configured scene."""
+        scene = self._direct_scene_for_program(program)
+        if scene is not None:
+            return scene
+        # Fallback to the default program's scene (0 disables the fallback).
+        default = self._config.default_program
+        if default and 1 <= default <= len(self._config.scenes):
+            return self._config.scenes[default - 1] or None
         return None
 
     async def _scene_worker(self) -> None:
@@ -232,7 +243,11 @@ class Bridge:
             scene_id = self._scene_for_program(program)
             self._applied_program = program
             if scene_id is None:
-                # No scene mapped (or "no function" with no idle scene): hold.
+                # No scene mapped and no default fallback: hold.
+                continue
+            if scene_id == self._applied_scene:
+                # Already on this scene (e.g. several unmapped programs fall back
+                # to the same default): don't re-activate it.
                 continue
             try:
                 await self._ledfx.activate_scene(scene_id)
