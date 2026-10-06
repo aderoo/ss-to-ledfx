@@ -1,0 +1,6 @@
+LedFx-main/
+.venv/
+__pycache__/
+*.pyc
+config.json
+config.json.tmp

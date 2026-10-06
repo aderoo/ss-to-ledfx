@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SoundSwitch → LedFx bridge</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+    margin: 0; background: #14161a; color: #e7e9ec; line-height: 1.45;
+  }
+  header { padding: 16px 20px; background: #1b1e24; border-bottom: 1px solid #2a2e36; }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  main { max-width: 880px; margin: 0 auto; padding: 20px; display: grid; gap: 20px; }
+  .card { background: #1b1e24; border: 1px solid #2a2e36; border-radius: 10px; padding: 16px 18px; }
+  .card h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: #9aa3af; }
+  .pills { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { padding: 6px 12px; border-radius: 999px; font-size: 13px; background: #262b33; border: 1px solid #333a44; }
+  .pill b { font-weight: 600; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; background: #6b7280; }
+  .ok { background: #2fb344; } .bad { background: #e5484d; } .warn { background: #e2a03f; }
+  .channels { display: grid; grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); gap: 8px; }
+  .ch { background: #262b33; border-radius: 6px; padding: 6px 4px; text-align: center; }
+  .ch .lab { font-size: 10px; color: #8b93a0; }
+  .ch .val { font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600; }
+  .ch .bar { height: 4px; border-radius: 2px; background: #3a4150; margin-top: 4px; overflow: hidden; }
+  .ch .bar > i { display: block; height: 100%; background: #4c8bf5; }
+  .ch.active { outline: 1px solid #4c8bf5; }
+  label { display: block; font-size: 12px; color: #9aa3af; margin: 10px 0 4px; }
+  input, select { width: 100%; padding: 7px 9px; background: #0f1115; color: #e7e9ec;
+    border: 1px solid #333a44; border-radius: 6px; font-size: 14px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .row { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .row span { font-size: 13px; color: #9aa3af; }
+  button { margin-top: 14px; padding: 9px 18px; background: #4c8bf5; color: #fff; border: 0;
+    border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button:hover { background: #3f78d8; }
+  .toggle { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .toggle input { width: auto; }
+  .muted { color: #6b7280; font-size: 12px; }
+  .saved { color: #2fb344; font-size: 13px; margin-left: 10px; }
+</style>
+</head>
+<body>
+<header><h1>SoundSwitch&nbsp;→&nbsp;LedFx bridge</h1></header>
+<main>
+
+  <section class="card">
+    <h2>Status</h2>
+    <div class="pills" id="status-pills"></div>
+  </section>
+
+  <section class="card">
+    <h2>Live DMX (Freedom Flex 15CH)</h2>
+    <div class="channels" id="channels"></div>
+    <p class="muted" id="ch-note" style="margin-top:10px"></p>
+  </section>
+
+  <section class="card">
+    <h2>Program → Scene mapping</h2>
+    <p class="muted">Channel 8 auto-program N activates the scene chosen for program N.</p>
+    <div id="scene-map"></div>
+  </section>
+
+  <section class="card">
+    <h2>Settings</h2>
+    <div class="grid2">
+      <div>
+        <label>Art-Net universe (15-bit port address)</label>
+        <input id="s-universe" type="number" min="0" max="32767">
+        <label>Art-Net bind host</label>
+        <input id="s-bindhost" type="text">
+        <label>Art-Net bind port</label>
+        <input id="s-bindport" type="number" min="1" max="65535">
+        <label>Fixture start address (channel 1)</label>
+        <input id="s-start" type="number" min="1" max="512">
+      </div>
+      <div>
+        <label>LedFx base URL</label>
+        <input id="s-ledfx" type="text">
+        <label>Scene debounce (ms)</label>
+        <input id="s-debounce" type="number" min="0" max="2000">
+        <label>Brightness max rate (Hz)</label>
+        <input id="s-rate" type="number" min="1" max="60">
+        <label>"No function" (ch8 ≤ 10) scene — blank = hold current</label>
+        <select id="s-nofunc"></select>
+      </div>
+    </div>
+    <div class="toggle"><input type="checkbox" id="s-scenes"><label style="margin:0">Control scenes (channel 8)</label></div>
+    <div class="toggle"><input type="checkbox" id="s-bright"><label style="margin:0">Control brightness (channel 1)</label></div>
+    <button id="save">Save settings</button><span class="saved" id="saved-msg"></span>
+  </section>
+
+</main>
+
+<script>
+const MAX_PROGRAMS = 25;
+const CH_NAMES = ["Dimmer","Red","Green","Blue","White","CTC","Strobe","Program",
+  "Prog speed","FG dim","FG colour","BG dim","BG colour","Dim mode","Fade speed"];
+const CH_USED = { 1: "brightness", 8: "scene" };
+
+let sceneOptions = [];   // [{id, name}]
+let settings = null;
+
+function el(id){ return document.getElementById(id); }
+
+function optionList(selectedId, includeBlank){
+  let html = includeBlank ? '<option value="">— none —</option>' : '';
+  for (const s of sceneOptions){
+    const sel = s.id === selectedId ? ' selected' : '';
+    html += `<option value="${s.id}"${sel}>${s.name} (${s.id})</option>`;
+  }
+  return html;
+}
+
+function renderChannels(channels, activeProgram){
+  const wrap = el("channels");
+  wrap.innerHTML = "";
+  (channels || []).forEach((v, i) => {
+    const ch = i + 1;
+    const used = CH_USED[ch];
+    const d = document.createElement("div");
+    d.className = "ch" + (used ? " active" : "");
+    d.innerHTML = `<div class="lab">${ch}. ${CH_NAMES[i] || ""}</div>
+      <div class="val">${v}</div>
+      <div class="bar"><i style="width:${(v/255*100).toFixed(0)}%"></i></div>`;
+    wrap.appendChild(d);
+  });
+  el("ch-note").textContent =
+    "Highlighted channels are used in phase 1 (1 = brightness, 8 = scene).";
+}
+
+function pill(label, value, state){
+  const dot = state ? `<span class="dot ${state}"></span>` : "";
+  return `<span class="pill">${dot}<b>${label}:</b> ${value}</span>`;
+}
+
+async function pollStatus(){
+  try{
+    const r = await fetch("/api/status");
+    const s = await r.json();
+    const a = s.artnet, l = s.ledfx, b = s.bridge;
+    const since = a.seconds_since_last_packet;
+    const pills = [
+      pill("Art-Net", a.receiving ? "receiving" : "no packets",
+           a.receiving ? "ok" : "bad"),
+      pill("Universe", a.universe),
+      pill("Packets", a.packets_received),
+      pill("Last packet", since == null ? "never" : since.toFixed(1)+"s ago"),
+      pill("LedFx", l.reachable ? "connected" : "unreachable",
+           l.reachable ? "ok" : "bad"),
+      pill("Program", b.program == null ? "—" : b.program),
+      pill("Scene", b.scene || "—"),
+      pill("Brightness", b.brightness == null ? "—" : Math.round(b.brightness*100)+"%"),
+    ];
+    el("status-pills").innerHTML = pills.join("");
+    renderChannels(b.channels, b.program);
+  }catch(e){
+    el("status-pills").innerHTML = pill("Bridge", "not responding", "bad");
+  }
+}
+
+function renderSceneMap(){
+  const wrap = el("scene-map");
+  wrap.innerHTML = "";
+  for (let p = 1; p <= MAX_PROGRAMS; p++){
+    const current = settings.scenes[p-1] || "";
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<span>Program ${p}</span>
+      <select data-prog="${p}">${optionList(current, true)}</select>`;
+    wrap.appendChild(row);
+  }
+}
+
+function fillSettingsForm(){
+  el("s-universe").value = settings.artnet.universe;
+  el("s-bindhost").value = settings.artnet.bind_host;
+  el("s-bindport").value = settings.artnet.bind_port;
+  el("s-start").value = settings.start_address;
+  el("s-ledfx").value = settings.ledfx.base_url;
+  el("s-debounce").value = settings.scene_debounce_ms;
+  el("s-rate").value = settings.brightness_max_rate_hz;
+  el("s-nofunc").innerHTML = optionList(settings.no_function_scene || "", true);
+  el("s-scenes").checked = settings.control_scenes;
+  el("s-bright").checked = settings.control_brightness;
+}
+
+function collectSettings(){
+  const scenes = [];
+  document.querySelectorAll('#scene-map select').forEach(sel => {
+    scenes[parseInt(sel.dataset.prog,10)-1] = sel.value;
+  });
+  // Trim trailing empties but keep gaps.
+  while (scenes.length && !scenes[scenes.length-1]) scenes.pop();
+  return {
+    artnet: {
+      universe: parseInt(el("s-universe").value,10),
+      bind_host: el("s-bindhost").value.trim(),
+      bind_port: parseInt(el("s-bindport").value,10),
+    },
+    ledfx: { base_url: el("s-ledfx").value.trim() },
+    start_address: parseInt(el("s-start").value,10),
+    scene_debounce_ms: parseInt(el("s-debounce").value,10),
+    brightness_max_rate_hz: parseFloat(el("s-rate").value),
+    no_function_scene: el("s-nofunc").value || null,
+    control_scenes: el("s-scenes").checked,
+    control_brightness: el("s-bright").checked,
+    scenes: scenes,
+  };
+}
+
+async function save(){
+  const body = collectSettings();
+  const r = await fetch("/api/settings", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(body),
+  });
+  const res = await r.json();
+  if (res.status === "ok"){
+    settings = res.settings;
+    el("saved-msg").textContent = "Saved ✓";
+    setTimeout(()=> el("saved-msg").textContent = "", 2000);
+  } else {
+    el("saved-msg").textContent = "Error: " + (res.error || "unknown");
+  }
+}
+
+async function init(){
+  const [sc, st] = await Promise.all([
+    fetch("/api/ledfx/scenes").then(r=>r.json()),
+    fetch("/api/settings").then(r=>r.json()),
+  ]);
+  sceneOptions = sc.scenes || [];
+  settings = st;
+  renderSceneMap();
+  fillSettingsForm();
+  el("save").addEventListener("click", save);
+  pollStatus();
+  setInterval(pollStatus, 250);
+}
+init();
+</script>
+</body>
+</html>
