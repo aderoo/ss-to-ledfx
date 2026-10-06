@@ -215,52 +215,56 @@ class Bridge:
             return self._config.scenes[default - 1] or None
         return None
 
+    def _effective_program(self, raw: int | None) -> int | None:
+        """The program whose scene is actually used for `raw`: the raw program
+        if it maps to a scene directly, else the default program when the
+        fallback supplies one."""
+        if self._direct_scene_for_program(raw) is not None:
+            return raw
+        if self._scene_for_program(raw) is not None:
+            return self._config.default_program
+        return raw
+
     async def _scene_worker(self) -> None:
-        """Debounce channel 8 and activate the mapped scene on a stable change."""
+        """Debounce channel 8 and activate the resolved scene when it changes."""
         tick = 0.01  # 10 ms
         while self._running:
             await asyncio.sleep(tick)
             if not self._config.control_scenes or self._whiteout_active:
                 continue
 
-            program = program_from_value(self._channels[CH_PROGRAM])
-            if program == self._applied_program:
-                self._candidate_program = program
-                continue
-
+            # Debounce the raw channel-8 program number so a crossfade sweeping
+            # through values doesn't briefly select the wrong scene.
+            raw = program_from_value(self._channels[CH_PROGRAM])
             now = time.monotonic()
-            if program != self._candidate_program:
-                # New candidate; (re)start the debounce timer.
-                self._candidate_program = program
+            if raw != self._candidate_program:
+                self._candidate_program = raw
                 self._candidate_since = now
                 continue
-
-            held_ms = (now - self._candidate_since) * 1000.0
-            if held_ms < self._config.scene_debounce_ms:
+            if (now - self._candidate_since) * 1000.0 < self._config.scene_debounce_ms:
                 continue
 
-            # Candidate has held steady long enough: apply it.
-            scene_id = self._scene_for_program(program)
-            self._applied_program = program
-            if scene_id is None:
-                # No scene mapped and no default fallback: hold.
-                continue
-            if scene_id == self._applied_scene:
-                # Already on this scene (e.g. several unmapped programs fall back
-                # to the same default): don't re-activate it.
+            # Resolve the scene (with default-program fallback) and track which
+            # program is effectively active. Change detection is by scene, so
+            # the fallback fires even when the raw number didn't change.
+            scene_id = self._scene_for_program(raw)
+            self._applied_program = self._effective_program(raw)
+            if scene_id is None or scene_id == self._applied_scene:
                 continue
             try:
                 await self._ledfx.activate_scene(scene_id)
                 self._applied_scene = scene_id
-                _LOGGER.info("Program %s -> activated scene '%s'", program, scene_id)
+                _LOGGER.info(
+                    "Program %s -> activated scene '%s'", self._applied_program, scene_id
+                )
                 # The scene reloaded its saved effects/colours: refresh which
                 # virtuals are colour-capable and force a colour re-push.
                 await self.refresh_color_targets()
                 self._force_color_resend = True
             except LedFxError as err:
                 _LOGGER.warning("Failed to activate scene '%s': %s", scene_id, err)
-                # Allow a retry on the next change.
-                self._applied_program = None
+                # Allow a retry: forget the applied scene so it re-fires.
+                self._applied_scene = None
 
     def _active_program(self) -> int | None:
         """The program whose settings apply now. While white-out is active its
