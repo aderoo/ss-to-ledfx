@@ -96,6 +96,15 @@ class LedFxClient:
             raise LedFxError(f"Unexpected /api/virtuals response: {body}")
         return virtuals
 
+    async def set_virtual_config(self, virtual_id: str, config: dict) -> None:
+        """Update a virtual's own config (POST /api/virtuals), e.g. transition."""
+        body = await self._request(
+            "POST", "/api/virtuals", json={"id": virtual_id, "config": config}
+        )
+        if isinstance(body, dict) and body.get("status") == "failed":
+            reason = body.get("payload", {}).get("reason", body)
+            raise LedFxError(f"set_virtual_config({virtual_id}): {reason}")
+
     async def set_effect(
         self, virtual_id: str, effect_type: str, config: dict
     ) -> None:

@@ -51,6 +51,10 @@ SoundSwitch colour channels drive the effect colour while that scene is running:
   effect.)
 - The target device must be **online**: if a virtual's device is unreachable,
   LedFx drops its effect, so there is nothing to colour.
+- A colour change restarts the effect, which would otherwise crossfade over the
+  virtual's `transition_time`. The bridge forces each target's `transition_time`
+  to **`color_transition_time`** (default **0 = instant snap**) so the colour
+  tracks the DMX with no lag. Raise it in the UI to deliberately smooth colour.
 - If R, G, B and W are all 0, the scene's saved colours are left untouched.
 - The colour is re-sent right after a scene activates (the scene reloads its
   saved colours), and updates are rate-limited (default ~25/sec).

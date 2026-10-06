@@ -65,7 +65,12 @@ class Config:
 
     scene_debounce_ms: int = 100
     brightness_max_rate_hz: float = 25.0
-    color_max_rate_hz: float = 25.0
+    color_max_rate_hz: float = 40.0
+
+    # Transition time (seconds) forced on colour-override target virtuals.
+    # 0 = instant: colour snaps with the DMX instead of crossfading. Raise it
+    # to deliberately smooth the colour.
+    color_transition_time: float = 0.0
 
     # Master switches for the behaviours.
     control_brightness: bool = True
@@ -118,6 +123,7 @@ class Config:
             "scene_debounce_ms",
             "brightness_max_rate_hz",
             "color_max_rate_hz",
+            "color_transition_time",
             "control_brightness",
             "control_scenes",
             "control_color",
@@ -138,6 +144,7 @@ class Config:
             "scene_debounce_ms": self.scene_debounce_ms,
             "brightness_max_rate_hz": self.brightness_max_rate_hz,
             "color_max_rate_hz": self.color_max_rate_hz,
+            "color_transition_time": self.color_transition_time,
             "control_brightness": self.control_brightness,
             "control_scenes": self.control_scenes,
             "control_color": self.control_color,

@@ -130,6 +130,18 @@ class Bridge:
             effect_type = effect.get("type")
             if effect_type and "color" in config:
                 targets[vid] = {"type": effect_type, "config": dict(config)}
+                # Force the virtual's transition so colour changes snap with the
+                # DMX (a colour change restarts the effect, which otherwise
+                # crossfades over the virtual's transition_time).
+                want = info.get("config", {}).get("transition_time")
+                if want != self._config.color_transition_time:
+                    try:
+                        await self._ledfx.set_virtual_config(
+                            vid,
+                            {"transition_time": self._config.color_transition_time},
+                        )
+                    except LedFxError as err:
+                        _LOGGER.debug("Set transition on %s failed: %s", vid, err)
         self._color_targets = targets
 
     def start(self) -> None:
