@@ -21,6 +21,10 @@ from .ledfx_client import LedFxClient, LedFxError
 _LOGGER = logging.getLogger(__name__)
 
 CH_DIMMER = 1  # 1-based fixture channel numbers
+CH_RED = 2
+CH_GREEN = 3
+CH_BLUE = 4
+CH_WHITE = 5
 CH_PROGRAM = 8
 
 MAX_PROGRAM = 25
@@ -34,6 +38,13 @@ def program_from_value(value: int) -> int | None:
     if value <= 10:
         return None
     return min(MAX_PROGRAM, (value - 11) // 8 + 1)
+
+
+def rgbw_to_hex(r: int, g: int, b: int, w: int) -> str:
+    """Fold the white channel into RGB (additive) and return a #rrggbb string."""
+    return "#{:02x}{:02x}{:02x}".format(
+        min(255, r + w), min(255, g + w), min(255, b + w)
+    )
 
 
 class Bridge:
@@ -57,6 +68,14 @@ class Bridge:
         # Brightness state.
         self._applied_brightness: float | None = None
         self._last_brightness_send: float = 0.0
+
+        # Colour-override state.
+        self._applied_color: str | None = None
+        # Virtual IDs whose active effect exposes a `color` setting.
+        self._color_targets: list[str] = []
+        # Set after a scene activates: its saved colours are reloaded, so the
+        # override colour must be pushed again even if it hasn't changed.
+        self._force_color_resend = False
 
         # Known scene IDs fetched from LedFx, for validation / warnings.
         self._known_scenes: set[str] = set()
@@ -95,11 +114,27 @@ class Bridge:
                     "Program %d -> scene '%s' does not exist in LedFx", i, scene_id
                 )
 
+    async def refresh_color_targets(self) -> None:
+        """Cache the virtuals whose active effect exposes a `color` setting."""
+        try:
+            virtuals = await self._ledfx.get_virtuals()
+        except LedFxError as err:
+            _LOGGER.debug("Could not fetch virtuals: %s", err)
+            return
+        targets = []
+        for vid, info in virtuals.items():
+            effect = info.get("effect") or {}
+            config = effect.get("config") or {}
+            if "color" in config:
+                targets.append(vid)
+        self._color_targets = targets
+
     def start(self) -> None:
         self._running = True
         self._tasks = [
             asyncio.create_task(self._scene_worker(), name="scene_worker"),
             asyncio.create_task(self._brightness_worker(), name="brightness_worker"),
+            asyncio.create_task(self._color_worker(), name="color_worker"),
         ]
 
     async def stop(self) -> None:
@@ -160,10 +195,24 @@ class Bridge:
                 await self._ledfx.activate_scene(scene_id)
                 self._applied_scene = scene_id
                 _LOGGER.info("Program %s -> activated scene '%s'", program, scene_id)
+                # The scene reloaded its saved effects/colours: refresh which
+                # virtuals are colour-capable and force a colour re-push.
+                await self.refresh_color_targets()
+                self._force_color_resend = True
             except LedFxError as err:
                 _LOGGER.warning("Failed to activate scene '%s': %s", scene_id, err)
                 # Allow a retry on the next change.
                 self._applied_program = None
+
+    def _color_override_active(self) -> bool:
+        """Whether the current program allows RGBW colour override."""
+        program = self._applied_program
+        if program is None:
+            return False
+        idx = program - 1
+        return 0 <= idx < len(self._config.color_override) and bool(
+            self._config.color_override[idx]
+        )
 
     async def _brightness_worker(self) -> None:
         """Scale channel 1 to global_brightness, rate limited, skip no-ops."""
@@ -184,6 +233,38 @@ class Bridge:
             except LedFxError as err:
                 _LOGGER.debug("Brightness update failed: %s", err)
 
+    async def _color_worker(self) -> None:
+        """Push RGBW (ch 2-5) to colour-capable effects while override is on."""
+        while self._running:
+            rate = max(1.0, float(self._config.color_max_rate_hz))
+            await asyncio.sleep(1.0 / rate)
+            if not self._config.control_color or not self._color_override_active():
+                # Reset so re-enabling (or a new scene) re-sends the colour.
+                self._applied_color = None
+                continue
+
+            r = self._channels[CH_RED]
+            g = self._channels[CH_GREEN]
+            b = self._channels[CH_BLUE]
+            w = self._channels[CH_WHITE]
+            if r == g == b == w == 0:
+                # All-zero: leave the scene's saved colours untouched.
+                continue
+
+            target = rgbw_to_hex(r, g, b, w)
+            if target == self._applied_color and not self._force_color_resend:
+                continue
+
+            self._force_color_resend = False
+            if not self._color_targets:
+                await self.refresh_color_targets()
+            for vid in self._color_targets:
+                try:
+                    await self._ledfx.set_effect_color(vid, target)
+                except LedFxError as err:
+                    _LOGGER.debug("Colour update on %s failed: %s", vid, err)
+            self._applied_color = target
+
     # --- status for the web UI ------------------------------------------
 
     def status(self) -> dict:
@@ -192,7 +273,11 @@ class Bridge:
             "program": self._applied_program,
             "scene": self._applied_scene,
             "brightness": self._applied_brightness,
+            "color": self._applied_color if self._color_override_active() else None,
+            "color_override_active": self._color_override_active(),
+            "color_targets": list(self._color_targets),
             "known_scenes": sorted(self._known_scenes),
             "control_scenes": self._config.control_scenes,
             "control_brightness": self._config.control_brightness,
+            "control_color": self._config.control_color,
         }

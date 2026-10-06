@@ -88,6 +88,25 @@ class LedFxClient:
             reason = body.get("payload", {}).get("reason", body)
             raise LedFxError(f"activate_scene({scene_id}): {reason}")
 
+    async def get_virtuals(self) -> dict[str, dict]:
+        """Return the virtuals mapping {virtual_id: info-with-active-effect}."""
+        body = await self._request("GET", "/api/virtuals")
+        virtuals = body.get("virtuals", {})
+        if not isinstance(virtuals, dict):
+            raise LedFxError(f"Unexpected /api/virtuals response: {body}")
+        return virtuals
+
+    async def set_effect_color(self, virtual_id: str, color: str) -> None:
+        """Patch the running effect's `color` on one virtual (PUT /effects)."""
+        body = await self._request(
+            "PUT",
+            f"/api/virtuals/{virtual_id}/effects",
+            json={"config": {"color": color}},
+        )
+        if isinstance(body, dict) and body.get("status") == "failed":
+            reason = body.get("payload", {}).get("reason", body)
+            raise LedFxError(f"set_effect_color({virtual_id}): {reason}")
+
     async def set_global_brightness(self, value: float) -> None:
         value = max(0.0, min(1.0, float(value)))
         body = await self._request(

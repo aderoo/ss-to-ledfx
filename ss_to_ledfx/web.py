@@ -111,6 +111,7 @@ class WebServer:
         # so a mapping edit takes effect without waiting for the next cue.
         self._app.bridge.reset_scene_state()
         await self._app.bridge.refresh_known_scenes()
+        await self._app.bridge.refresh_color_targets()
 
         return web.json_response({"status": "ok", "settings": cfg.to_dict()})
 

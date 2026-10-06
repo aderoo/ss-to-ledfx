@@ -30,7 +30,29 @@ SoundSwitch ──Art-Net (UDP 6454)──▶ ss-to-ledfx ──HTTP REST──�
   (~100 ms) so crossfades don't flicker through wrong scenes; brightness is
   capped at ~25 updates/sec.
 
-Phase 2 (colour / strobe / speed overrides) is designed but not yet built.
+### Per-program RGBW colour override
+
+Each program → scene mapping has an **RGBW override** checkbox. When ticked, the
+SoundSwitch colour channels drive the effect colour while that scene is running:
+
+| Channel | Function | Bridge action |
+|---------|----------|---------------|
+| 2 | Red | combined into the effect `color` |
+| 3 | Green | " |
+| 4 | Blue | " |
+| 5 | White | folded additively into R, G, B |
+
+- Only effects that expose a single `color` setting (e.g. **Single Color**)
+  follow the override; the bridge discovers which virtuals qualify from
+  `GET /api/virtuals` and pushes `PUT /api/virtuals/{id}/effects`
+  `{"config":{"color":"#rrggbb"}}` to each.
+- If R, G, B and W are all 0, the scene's saved colours are left untouched.
+- The colour is re-sent right after a scene activates (the scene reloads its
+  saved colours), and updates are rate-limited (default ~25/sec).
+- Leave the box unticked to let the scene keep full control of its colours.
+
+Strobe (ch 7), auto-program speed (ch 9) and dimmer-smoothing (ch 14) remain
+phase-2 TODOs.
 
 ## Requirements
 

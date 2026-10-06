@@ -48,6 +48,7 @@ class App:
         await self.ledfx.start()
         await self.ledfx.ping()
         await self.bridge.refresh_known_scenes()
+        await self.bridge.refresh_color_targets()
         self.bridge.start()
         self.receiver = await self._build_receiver()
         await self.web.start()

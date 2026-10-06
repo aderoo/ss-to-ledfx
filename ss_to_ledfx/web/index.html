@@ -33,7 +33,10 @@
     border: 1px solid #333a44; border-radius: 6px; font-size: 14px; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
   .row { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .maprow { grid-template-columns: 90px 1fr auto; }
   .row span { font-size: 13px; color: #9aa3af; }
+  .ovr { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #9aa3af; white-space: nowrap; }
+  .ovr input { width: auto; }
   button { margin-top: 14px; padding: 9px 18px; background: #4c8bf5; color: #fff; border: 0;
     border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
   button:hover { background: #3f78d8; }
@@ -60,7 +63,8 @@
 
   <section class="card">
     <h2>Program → Scene mapping</h2>
-    <p class="muted">Channel 8 auto-program N activates the scene chosen for program N.</p>
+    <p class="muted">Channel 8 auto-program N activates the scene chosen for program N.
+      Tick <b>RGBW override</b> to let SoundSwitch channels 2–5 drive the effect colour while that scene runs.</p>
     <div id="scene-map"></div>
   </section>
 
@@ -84,12 +88,15 @@
         <input id="s-debounce" type="number" min="0" max="2000">
         <label>Brightness max rate (Hz)</label>
         <input id="s-rate" type="number" min="1" max="60">
+        <label>Colour max rate (Hz)</label>
+        <input id="s-colorrate" type="number" min="1" max="60">
         <label>"No function" (ch8 ≤ 10) scene — blank = hold current</label>
         <select id="s-nofunc"></select>
       </div>
     </div>
     <div class="toggle"><input type="checkbox" id="s-scenes"><label style="margin:0">Control scenes (channel 8)</label></div>
     <div class="toggle"><input type="checkbox" id="s-bright"><label style="margin:0">Control brightness (channel 1)</label></div>
+    <div class="toggle"><input type="checkbox" id="s-color"><label style="margin:0">Control colour (channels 2–5 RGBW, where a program enables override)</label></div>
     <button id="save">Save settings</button><span class="saved" id="saved-msg"></span>
   </section>
 
@@ -99,7 +106,7 @@
 const MAX_PROGRAMS = 25;
 const CH_NAMES = ["Dimmer","Red","Green","Blue","White","CTC","Strobe","Program",
   "Prog speed","FG dim","FG colour","BG dim","BG colour","Dim mode","Fade speed"];
-const CH_USED = { 1: "brightness", 8: "scene" };
+const CH_USED = { 1: "brightness", 2: "colour", 3: "colour", 4: "colour", 5: "colour", 8: "scene" };
 
 let sceneOptions = [];   // [{id, name}]
 let settings = null;
@@ -129,7 +136,7 @@ function renderChannels(channels, activeProgram){
     wrap.appendChild(d);
   });
   el("ch-note").textContent =
-    "Highlighted channels are used in phase 1 (1 = brightness, 8 = scene).";
+    "Highlighted channels are used: 1 = brightness, 8 = scene, 2–5 = RGBW colour (when a program enables override).";
 }
 
 function pill(label, value, state){
@@ -154,6 +161,8 @@ async function pollStatus(){
       pill("Program", b.program == null ? "—" : b.program),
       pill("Scene", b.scene || "—"),
       pill("Brightness", b.brightness == null ? "—" : Math.round(b.brightness*100)+"%"),
+      pill("Colour", b.color_override_active ? (b.color || "scene default") : "off",
+           b.color_override_active ? "ok" : null),
     ];
     el("status-pills").innerHTML = pills.join("");
     renderChannels(b.channels, b.program);
@@ -167,10 +176,12 @@ function renderSceneMap(){
   wrap.innerHTML = "";
   for (let p = 1; p <= MAX_PROGRAMS; p++){
     const current = settings.scenes[p-1] || "";
+    const ovr = !!(settings.color_override && settings.color_override[p-1]);
     const row = document.createElement("div");
-    row.className = "row";
+    row.className = "row maprow";
     row.innerHTML = `<span>Program ${p}</span>
-      <select data-prog="${p}">${optionList(current, true)}</select>`;
+      <select data-prog="${p}">${optionList(current, true)}</select>
+      <label class="ovr"><input type="checkbox" data-ovr="${p}" ${ovr?"checked":""}>RGBW override</label>`;
     wrap.appendChild(row);
   }
 }
@@ -183,18 +194,26 @@ function fillSettingsForm(){
   el("s-ledfx").value = settings.ledfx.base_url;
   el("s-debounce").value = settings.scene_debounce_ms;
   el("s-rate").value = settings.brightness_max_rate_hz;
+  el("s-colorrate").value = settings.color_max_rate_hz;
   el("s-nofunc").innerHTML = optionList(settings.no_function_scene || "", true);
   el("s-scenes").checked = settings.control_scenes;
   el("s-bright").checked = settings.control_brightness;
+  el("s-color").checked = settings.control_color;
 }
 
 function collectSettings(){
   const scenes = [];
+  const override = [];
   document.querySelectorAll('#scene-map select').forEach(sel => {
     scenes[parseInt(sel.dataset.prog,10)-1] = sel.value;
   });
+  document.querySelectorAll('#scene-map input[data-ovr]').forEach(cb => {
+    override[parseInt(cb.dataset.ovr,10)-1] = cb.checked;
+  });
   // Trim trailing empties but keep gaps.
   while (scenes.length && !scenes[scenes.length-1]) scenes.pop();
+  override.length = scenes.length;   // keep parallel with scenes
+  for (let i=0;i<override.length;i++) override[i] = !!override[i];
   return {
     artnet: {
       universe: parseInt(el("s-universe").value,10),
@@ -205,10 +224,13 @@ function collectSettings(){
     start_address: parseInt(el("s-start").value,10),
     scene_debounce_ms: parseInt(el("s-debounce").value,10),
     brightness_max_rate_hz: parseFloat(el("s-rate").value),
+    color_max_rate_hz: parseFloat(el("s-colorrate").value),
     no_function_scene: el("s-nofunc").value || null,
     control_scenes: el("s-scenes").checked,
     control_brightness: el("s-bright").checked,
+    control_color: el("s-color").checked,
     scenes: scenes,
+    color_override: override,
   };
 }
 

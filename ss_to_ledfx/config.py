@@ -55,16 +55,22 @@ class Config:
     # Ordered list of LedFx scene IDs. Index 0 == Auto program 1.
     scenes: list[str] = field(default_factory=list)
 
+    # Parallel to `scenes`: when True, program N lets the SoundSwitch RGBW
+    # channels (2-5) override the active effect's colour while that scene runs.
+    color_override: list[bool] = field(default_factory=list)
+
     # None -> keep the current scene when channel 8 reads "no function"
     # (<= 10). A scene ID switches to that scene instead.
     no_function_scene: str | None = None
 
     scene_debounce_ms: int = 100
     brightness_max_rate_hz: float = 25.0
+    color_max_rate_hz: float = 25.0
 
-    # Master switches for the two phase-1 behaviours.
+    # Master switches for the behaviours.
     control_brightness: bool = True
     control_scenes: bool = True
+    control_color: bool = True
 
     # --- persistence -----------------------------------------------------
 
@@ -107,11 +113,14 @@ class Config:
         scalar = {
             "start_address",
             "scenes",
+            "color_override",
             "no_function_scene",
             "scene_debounce_ms",
             "brightness_max_rate_hz",
+            "color_max_rate_hz",
             "control_brightness",
             "control_scenes",
+            "control_color",
         }
         for key in scalar:
             if key in data:
@@ -124,11 +133,14 @@ class Config:
             "web": asdict(self.web),
             "start_address": self.start_address,
             "scenes": list(self.scenes),
+            "color_override": list(self.color_override),
             "no_function_scene": self.no_function_scene,
             "scene_debounce_ms": self.scene_debounce_ms,
             "brightness_max_rate_hz": self.brightness_max_rate_hz,
+            "color_max_rate_hz": self.color_max_rate_hz,
             "control_brightness": self.control_brightness,
             "control_scenes": self.control_scenes,
+            "control_color": self.control_color,
         }
 
     def save(self) -> None:
