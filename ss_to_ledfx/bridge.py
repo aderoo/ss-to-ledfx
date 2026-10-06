@@ -71,8 +71,10 @@ class Bridge:
 
         # Colour-override state.
         self._applied_color: str | None = None
-        # Virtual IDs whose active effect exposes a `color` setting.
-        self._color_targets: list[str] = []
+        # Virtuals whose active effect exposes a `color` setting, with the
+        # effect type and base config to re-POST (merging the new colour):
+        #   {virtual_id: {"type": str, "config": dict}}
+        self._color_targets: dict[str, dict] = {}
         # Set after a scene activates: its saved colours are reloaded, so the
         # override colour must be pushed again even if it hasn't changed.
         self._force_color_resend = False
@@ -121,12 +123,13 @@ class Bridge:
         except LedFxError as err:
             _LOGGER.debug("Could not fetch virtuals: %s", err)
             return
-        targets = []
+        targets: dict[str, dict] = {}
         for vid, info in virtuals.items():
             effect = info.get("effect") or {}
             config = effect.get("config") or {}
-            if "color" in config:
-                targets.append(vid)
+            effect_type = effect.get("type")
+            if effect_type and "color" in config:
+                targets[vid] = {"type": effect_type, "config": dict(config)}
         self._color_targets = targets
 
     def start(self) -> None:
@@ -258,9 +261,10 @@ class Bridge:
             self._force_color_resend = False
             if not self._color_targets:
                 await self.refresh_color_targets()
-            for vid in self._color_targets:
+            for vid, meta in self._color_targets.items():
+                merged = {**meta["config"], "color": target}
                 try:
-                    await self._ledfx.set_effect_color(vid, target)
+                    await self._ledfx.set_effect(vid, meta["type"], merged)
                 except LedFxError as err:
                     _LOGGER.debug("Colour update on %s failed: %s", vid, err)
             self._applied_color = target
@@ -275,7 +279,7 @@ class Bridge:
             "brightness": self._applied_brightness,
             "color": self._applied_color if self._color_override_active() else None,
             "color_override_active": self._color_override_active(),
-            "color_targets": list(self._color_targets),
+            "color_targets": sorted(self._color_targets),
             "known_scenes": sorted(self._known_scenes),
             "control_scenes": self._config.control_scenes,
             "control_brightness": self._config.control_brightness,

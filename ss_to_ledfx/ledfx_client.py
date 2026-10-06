@@ -96,16 +96,23 @@ class LedFxClient:
             raise LedFxError(f"Unexpected /api/virtuals response: {body}")
         return virtuals
 
-    async def set_effect_color(self, virtual_id: str, color: str) -> None:
-        """Patch the running effect's `color` on one virtual (PUT /effects)."""
+    async def set_effect(
+        self, virtual_id: str, effect_type: str, config: dict
+    ) -> None:
+        """Set an effect on a virtual (POST /effects).
+
+        Used for the colour override: POST (set) is robust where PUT (patch)
+        is not - patching a config-only body crashes some LedFx builds and
+        clears the effect, while POST re-establishes it with the merged config.
+        """
         body = await self._request(
-            "PUT",
+            "POST",
             f"/api/virtuals/{virtual_id}/effects",
-            json={"config": {"color": color}},
+            json={"type": effect_type, "config": config},
         )
         if isinstance(body, dict) and body.get("status") == "failed":
             reason = body.get("payload", {}).get("reason", body)
-            raise LedFxError(f"set_effect_color({virtual_id}): {reason}")
+            raise LedFxError(f"set_effect({virtual_id}): {reason}")
 
     async def set_global_brightness(self, value: float) -> None:
         value = max(0.0, min(1.0, float(value)))

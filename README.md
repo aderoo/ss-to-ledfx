@@ -44,8 +44,13 @@ SoundSwitch colour channels drive the effect colour while that scene is running:
 
 - Only effects that expose a single `color` setting (e.g. **Single Color**)
   follow the override; the bridge discovers which virtuals qualify from
-  `GET /api/virtuals` and pushes `PUT /api/virtuals/{id}/effects`
-  `{"config":{"color":"#rrggbb"}}` to each.
+  `GET /api/virtuals` and re-sets the effect with `POST
+  /api/virtuals/{id}/effects` `{"type":<effect>,"config":{...,"color":"#rrggbb"}}`,
+  merging the new colour into the effect's existing config. (POST is used rather
+  than a config-only PUT patch, which crashes some LedFx builds and clears the
+  effect.)
+- The target device must be **online**: if a virtual's device is unreachable,
+  LedFx drops its effect, so there is nothing to colour.
 - If R, G, B and W are all 0, the scene's saved colours are left untouched.
 - The colour is re-sent right after a scene activates (the scene reloads its
   saved colours), and updates are rate-limited (default ~25/sec).
