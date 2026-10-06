@@ -99,8 +99,9 @@
     <div class="toggle"><input type="checkbox" id="s-scenes"><label style="margin:0">Control scenes (channel 8)</label></div>
     <div class="toggle"><input type="checkbox" id="s-bright"><label style="margin:0">Control brightness (channel 1)</label></div>
     <div class="toggle"><input type="checkbox" id="s-color"><label style="margin:0">Control colour (channels 2–5 RGBW, where a program enables override)</label></div>
-    <div class="toggle"><input type="checkbox" id="s-whiteout"><label style="margin:0">White-out: when dimmer + RGBW all reach the threshold, force every strip to solid white</label></div>
-    <div class="row" style="max-width:320px;margin-top:6px"><span>White-out level</span><input id="s-whiteout-thr" type="number" min="1" max="255"></div>
+    <div class="toggle"><input type="checkbox" id="s-whiteout"><label style="margin:0">White-out: when dimmer + RGBW all reach the level, temporarily activate the white-out program's scene</label></div>
+    <div class="row" style="max-width:360px;margin-top:6px"><span>White-out level</span><input id="s-whiteout-thr" type="number" min="1" max="255"></div>
+    <div class="row" style="max-width:360px;margin-top:6px"><span>White-out program</span><input id="s-whiteout-prog" type="number" min="1" max="25"></div>
     <button id="save">Save settings</button><span class="saved" id="saved-msg"></span>
   </section>
 
@@ -207,6 +208,7 @@ function fillSettingsForm(){
   el("s-color").checked = settings.control_color;
   el("s-whiteout").checked = settings.white_out;
   el("s-whiteout-thr").value = settings.white_out_threshold;
+  el("s-whiteout-prog").value = settings.white_out_program;
 }
 
 function collectSettings(){
@@ -240,6 +242,7 @@ function collectSettings(){
     control_color: el("s-color").checked,
     white_out: el("s-whiteout").checked,
     white_out_threshold: parseInt(el("s-whiteout-thr").value,10),
+    white_out_program: parseInt(el("s-whiteout-prog").value,10),
     scenes: scenes,
     color_override: override,
   };

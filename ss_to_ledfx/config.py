@@ -77,11 +77,13 @@ class Config:
     control_scenes: bool = True
     control_color: bool = True
 
-    # White-out: when the dimmer (ch1) and all RGBW channels (ch2-5) are at
-    # or above white_out_threshold, force every strip to solid white (replacing
-    # its effect), then restore effects when the condition clears.
+    # White-out (global override): when the dimmer (ch1) and all RGBW channels
+    # (ch2-5) are at or above white_out_threshold, temporarily activate the
+    # white_out_program's scene (your white-out look). When the condition
+    # clears, normal program selection (channel 8) resumes.
     white_out: bool = False
     white_out_threshold: int = 255
+    white_out_program: int = 1
 
     # --- persistence -----------------------------------------------------
 
@@ -135,6 +137,7 @@ class Config:
             "control_color",
             "white_out",
             "white_out_threshold",
+            "white_out_program",
         }
         for key in scalar:
             if key in data:
@@ -158,6 +161,7 @@ class Config:
             "control_color": self.control_color,
             "white_out": self.white_out,
             "white_out_threshold": self.white_out_threshold,
+            "white_out_program": self.white_out_program,
         }
 
     def save(self) -> None:

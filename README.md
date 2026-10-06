@@ -62,17 +62,17 @@ SoundSwitch colour channels drive the effect colour while that scene is running:
   saved colours), and updates are rate-limited (default ~25/sec).
 - Leave the box unticked to let the scene keep full control of its colours.
 
-### White-out (full-on blinder)
+### White-out (global override)
 
 A global **White-out** toggle (off by default). When enabled, if the dimmer
 (ch 1) **and** all RGBW channels (ch 2–5) are at or above the white-out level
-(default 255), every strip snaps to solid white — regardless of its effect or
-the per-program override. This covers all effects, including multi-band ones
-(Scroll/Energy) and image effects, by temporarily switching each strip to Single
-Color white. When the channels drop back below the level, each strip's previous
-effect (and transition time) is restored.
+(default 255), the bridge temporarily activates the **white-out program's scene**
+(`white_out_program`, default program 1) — your designated white-out look. While
+active it overrides normal program selection and the colour override. When the
+channels drop back below the level, normal channel-8 program selection resumes.
 
-Build it in SoundSwitch as a cue that drives channels 1–5 to full.
+Set program 1 (or whichever `white_out_program` you choose) to a white scene in
+LedFx, then build a SoundSwitch cue that drives channels 1–5 to full.
 
 Strobe (ch 7), auto-program speed (ch 9) and dimmer-smoothing (ch 14) remain
 phase-2 TODOs.

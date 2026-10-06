@@ -81,10 +81,9 @@ class Bridge:
         # override colour must be pushed again even if it hasn't changed.
         self._force_color_resend = False
 
-        # White-out state. Snapshot captures each virtual's effect + transition
-        # so they can be restored when the white-out condition clears.
+        # White-out state (global override): activates white_out_program's scene
+        # while ch1-5 are all at full, then resumes normal program selection.
         self._whiteout_active = False
-        self._whiteout_snapshot: dict[str, dict] = {}
 
         # Known scene IDs fetched from LedFx, for validation / warnings.
         self._known_scenes: set[str] = set()
@@ -322,57 +321,34 @@ class Bridge:
                 await self._exit_whiteout()
 
     async def _enter_whiteout(self) -> None:
-        try:
-            virtuals = await self._ledfx.get_virtuals()
-        except LedFxError as err:
-            _LOGGER.debug("White-out: could not read virtuals: %s", err)
-            return
-        snapshot: dict[str, dict] = {}
-        for vid, info in virtuals.items():
-            effect = info.get("effect") or {}
-            etype = effect.get("type")
-            snapshot[vid] = {
-                "effect": (
-                    {"type": etype, "config": dict(effect.get("config") or {})}
-                    if etype
-                    else None
-                ),
-                "transition_time": info.get("config", {}).get("transition_time"),
-            }
-        self._whiteout_snapshot = snapshot
         self._whiteout_active = True
-        for vid in snapshot:
-            try:
-                # Instant: a blinder should snap, not fade.
-                await self._ledfx.set_virtual_config(vid, {"transition_time": 0})
-                await self._ledfx.set_effect(vid, "singleColor", {"color": "#ffffff"})
-            except LedFxError as err:
-                _LOGGER.debug("White-out on %s failed: %s", vid, err)
-        _LOGGER.info("White-out ON (%d strips)", len(snapshot))
+        scene_id = self._scene_for_program(self._config.white_out_program)
+        if scene_id is None:
+            _LOGGER.warning(
+                "White-out program %d has no scene configured",
+                self._config.white_out_program,
+            )
+            return
+        try:
+            await self._ledfx.activate_scene(scene_id)
+            self._applied_scene = scene_id
+            _LOGGER.info(
+                "White-out ON -> program %d scene '%s'",
+                self._config.white_out_program,
+                scene_id,
+            )
+        except LedFxError as err:
+            _LOGGER.warning("White-out scene '%s' failed: %s", scene_id, err)
 
     async def _exit_whiteout(self) -> None:
-        snapshot = self._whiteout_snapshot
         self._whiteout_active = False
-        self._whiteout_snapshot = {}
-        for vid, snap in snapshot.items():
-            try:
-                tt = snap.get("transition_time")
-                if tt is not None:
-                    await self._ledfx.set_virtual_config(vid, {"transition_time": tt})
-                effect = snap.get("effect")
-                if effect and effect.get("type"):
-                    await self._ledfx.set_effect(
-                        vid, effect["type"], effect["config"]
-                    )
-                else:
-                    await self._ledfx.clear_effect(vid)
-            except LedFxError as err:
-                _LOGGER.debug("White-out restore on %s failed: %s", vid, err)
-        # Re-apply per-program colour override after the restore.
+        # Resume: forget the applied program so the scene worker re-activates
+        # whatever channel 8 currently selects, and re-apply colour override.
+        self._applied_program = None
+        self._candidate_program = None
         self._applied_color = None
         self._force_color_resend = True
-        await self.refresh_color_targets()
-        _LOGGER.info("White-out OFF - restored %d strips", len(snapshot))
+        _LOGGER.info("White-out OFF - resuming normal program selection")
 
     # --- status for the web UI ------------------------------------------
 
