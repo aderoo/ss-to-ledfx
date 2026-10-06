@@ -247,9 +247,16 @@ class Bridge:
                 # Allow a retry on the next change.
                 self._applied_program = None
 
+    def _active_program(self) -> int | None:
+        """The program whose settings apply now. While white-out is active its
+        program takes over, so its RGBW override drives the colour too."""
+        if self._whiteout_active:
+            return self._config.white_out_program
+        return self._applied_program
+
     def _color_override_active(self) -> bool:
-        """Whether the current program allows RGBW colour override."""
-        program = self._applied_program
+        """Whether the active program allows RGBW colour override."""
+        program = self._active_program()
         if program is None:
             return False
         idx = program - 1
@@ -281,11 +288,7 @@ class Bridge:
         while self._running:
             rate = max(1.0, float(self._config.color_max_rate_hz))
             await asyncio.sleep(1.0 / rate)
-            if (
-                not self._config.control_color
-                or not self._color_override_active()
-                or self._whiteout_active
-            ):
+            if not self._config.control_color or not self._color_override_active():
                 # Reset so re-enabling (or a new scene) re-sends the colour.
                 self._applied_color = None
                 continue
@@ -404,6 +407,12 @@ class Bridge:
             )
         except LedFxError as err:
             _LOGGER.warning("White-out scene '%s' failed: %s", scene_id, err)
+            return
+        # If the white-out program has RGBW override on, drive its colour from
+        # ch2-5 now (all 255 -> white). Refresh targets for the new scene first.
+        await self.refresh_color_targets()
+        self._applied_color = None
+        self._force_color_resend = True
 
     async def _exit_whiteout(self) -> None:
         self._whiteout_active = False
