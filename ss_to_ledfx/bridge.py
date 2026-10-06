@@ -193,37 +193,37 @@ class Bridge:
 
     # --- mapping ---------------------------------------------------------
 
-    def _direct_scene_for_program(self, program: int | None) -> str | None:
-        """The scene directly mapped to a program, without any fallback."""
+    def _mapped_scene(self, program: int | None) -> str | None:
+        """The scene directly mapped to a real program number (no fallback)."""
         if program is None:
-            # "No function" (<= 10).
-            return self._config.no_function_scene or None
+            return None
         idx = program - 1
         if 0 <= idx < len(self._config.scenes):
             return self._config.scenes[idx] or None
         return None
 
-    def _scene_for_program(self, program: int | None) -> str | None:
-        """Resolve the scene a program should activate, falling back to the
-        default program when channel 8 doesn't map to a configured scene."""
-        scene = self._direct_scene_for_program(program)
+    def _program_and_scene(self, raw: int | None) -> tuple[int | None, str | None]:
+        """Resolve (effective_program, scene_id) for a raw channel-8 program.
+
+        A real program with a scene maps directly. Otherwise we fall back to the
+        default program - returning *its* number so its RGBW override applies.
+        The legacy no_function_scene is a last resort (no program, no override).
+        """
+        scene = self._mapped_scene(raw)
         if scene is not None:
-            return scene
-        # Fallback to the default program's scene (0 disables the fallback).
+            return raw, scene
         default = self._config.default_program
         if default and 1 <= default <= len(self._config.scenes):
-            return self._config.scenes[default - 1] or None
-        return None
+            fallback = self._config.scenes[default - 1] or None
+            if fallback is not None:
+                return default, fallback
+        if raw is None and self._config.no_function_scene:
+            return None, self._config.no_function_scene
+        return raw, None
 
-    def _effective_program(self, raw: int | None) -> int | None:
-        """The program whose scene is actually used for `raw`: the raw program
-        if it maps to a scene directly, else the default program when the
-        fallback supplies one."""
-        if self._direct_scene_for_program(raw) is not None:
-            return raw
-        if self._scene_for_program(raw) is not None:
-            return self._config.default_program
-        return raw
+    def _scene_for_program(self, program: int | None) -> str | None:
+        """Resolve just the scene a program should activate."""
+        return self._program_and_scene(program)[1]
 
     async def _scene_worker(self) -> None:
         """Debounce channel 8 and activate the resolved scene when it changes."""
@@ -244,11 +244,10 @@ class Bridge:
             if (now - self._candidate_since) * 1000.0 < self._config.scene_debounce_ms:
                 continue
 
-            # Resolve the scene (with default-program fallback) and track which
-            # program is effectively active. Change detection is by scene, so
-            # the fallback fires even when the raw number didn't change.
-            scene_id = self._scene_for_program(raw)
-            self._applied_program = self._effective_program(raw)
+            # Resolve the effective program + scene (with default-program
+            # fallback). Change detection is by scene, so the fallback fires even
+            # when the raw number didn't change.
+            self._applied_program, scene_id = self._program_and_scene(raw)
             if scene_id is None or scene_id == self._applied_scene:
                 continue
             try:
@@ -304,10 +303,23 @@ class Bridge:
 
     async def _color_worker(self) -> None:
         """Push RGBW (ch 2-5) to colour-capable effects while override is on."""
+        last_state: str | None = None
         while self._running:
             rate = max(1.0, float(self._config.color_max_rate_hz))
             await asyncio.sleep(1.0 / rate)
-            if not self._config.control_color or not self._color_override_active():
+            active = self._config.control_color and self._color_override_active()
+
+            # Readout of colour-override state on change (INFO, no -v needed).
+            state = (
+                f"ACTIVE program {self._active_program()} targets={sorted(self._color_targets)}"
+                if active
+                else "inactive"
+            )
+            if state != last_state:
+                last_state = state
+                _LOGGER.info("Colour override: %s", state)
+
+            if not active:
                 # Reset so re-enabling (or a new scene) re-sends the colour.
                 self._applied_color = None
                 continue
@@ -327,12 +339,28 @@ class Bridge:
             self._force_color_resend = False
             if not self._color_targets:
                 await self.refresh_color_targets()
+            if not self._color_targets:
+                _LOGGER.warning(
+                    "Colour override active but no colour-capable effects "
+                    "(the active scene's effects have no color/gradient, or the "
+                    "device is offline)"
+                )
+            ok = fail = 0
             for vid, meta in self._color_targets.items():
                 merged = {**meta["config"], meta["key"]: target}
                 try:
                     await self._ledfx.set_effect(vid, meta["type"], merged)
+                    ok += 1
                 except LedFxError as err:
+                    fail += 1
                     _LOGGER.debug("Colour update on %s failed: %s", vid, err)
+            if fail and not ok:
+                _LOGGER.warning(
+                    "Colour %s could not be applied to any target (%d failed) - "
+                    "device offline?",
+                    target,
+                    fail,
+                )
             self._applied_color = target
 
     def _whiteout_state(self, full: bool) -> str:
