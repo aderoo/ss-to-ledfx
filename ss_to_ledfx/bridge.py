@@ -71,9 +71,11 @@ class Bridge:
 
         # Colour-override state.
         self._applied_color: str | None = None
-        # Virtuals whose active effect exposes a `color` setting, with the
-        # effect type and base config to re-POST (merging the new colour):
-        #   {virtual_id: {"type": str, "config": dict}}
+        # Virtuals whose active effect can take a colour, with the effect type,
+        # base config, and which config key carries colour:
+        #   {virtual_id: {"type": str, "config": dict, "key": "color"|"gradient"}}
+        # `color` is a solid-colour setting (e.g. Single Color); `gradient` is
+        # a palette (e.g. Fire) that also accepts a solid hex to recolour it.
         self._color_targets: dict[str, dict] = {}
         # Set after a scene activates: its saved colours are reloaded, so the
         # override colour must be pushed again even if it hasn't changed.
@@ -117,7 +119,8 @@ class Bridge:
                 )
 
     async def refresh_color_targets(self) -> None:
-        """Cache the virtuals whose active effect exposes a `color` setting."""
+        """Cache virtuals whose active effect can take a colour (`color` or
+        `gradient`), with which key to set."""
         try:
             virtuals = await self._ledfx.get_virtuals()
         except LedFxError as err:
@@ -128,8 +131,16 @@ class Bridge:
             effect = info.get("effect") or {}
             config = effect.get("config") or {}
             effect_type = effect.get("type")
-            if effect_type and "color" in config:
-                targets[vid] = {"type": effect_type, "config": dict(config)}
+            if not effect_type:
+                continue
+            # Prefer a solid `color`; fall back to recolouring a `gradient`.
+            key = (
+                "color"
+                if "color" in config
+                else ("gradient" if "gradient" in config else None)
+            )
+            if key is not None:
+                targets[vid] = {"type": effect_type, "config": dict(config), "key": key}
                 # Force the virtual's transition so colour changes snap with the
                 # DMX (a colour change restarts the effect, which otherwise
                 # crossfades over the virtual's transition_time).
@@ -274,7 +285,7 @@ class Bridge:
             if not self._color_targets:
                 await self.refresh_color_targets()
             for vid, meta in self._color_targets.items():
-                merged = {**meta["config"], "color": target}
+                merged = {**meta["config"], meta["key"]: target}
                 try:
                     await self._ledfx.set_effect(vid, meta["type"], merged)
                 except LedFxError as err:

@@ -42,13 +42,15 @@ SoundSwitch colour channels drive the effect colour while that scene is running:
 | 4 | Blue | " |
 | 5 | White | folded additively into R, G, B |
 
-- Only effects that expose a single `color` setting (e.g. **Single Color**)
-  follow the override; the bridge discovers which virtuals qualify from
-  `GET /api/virtuals` and re-sets the effect with `POST
-  /api/virtuals/{id}/effects` `{"type":<effect>,"config":{...,"color":"#rrggbb"}}`,
-  merging the new colour into the effect's existing config. (POST is used rather
-  than a config-only PUT patch, which crashes some LedFx builds and clears the
-  effect.)
+- Effects that expose a `color` setting (e.g. **Single Color**) are recoloured
+  directly. Effects that instead use a `gradient` palette (e.g. **Fire**,
+  **Melt**) are recoloured by setting the gradient to the solid override colour.
+  Effects with neither (pure audio/diagnostic effects) are skipped.
+- The bridge discovers which virtuals qualify from `GET /api/virtuals` and
+  re-sets the effect with `POST /api/virtuals/{id}/effects`
+  `{"type":<effect>,"config":{...,"<color|gradient>":"#rrggbb"}}`, merging the
+  new colour into the effect's existing config. (POST is used rather than a
+  config-only PUT patch, which crashes some LedFx builds and clears the effect.)
 - The target device must be **online**: if a virtual's device is unreachable,
   LedFx drops its effect, so there is nothing to colour.
 - A colour change restarts the effect, which would otherwise crossfade over the
