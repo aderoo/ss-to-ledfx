@@ -84,6 +84,7 @@ class Bridge:
         # White-out state (global override): activates white_out_program's scene
         # while ch1-5 are all at full, then resumes normal program selection.
         self._whiteout_active = False
+        self._whiteout_last_state: str | None = None
 
         # Known scene IDs fetched from LedFx, for validation / warnings.
         self._known_scenes: set[str] = set()
@@ -312,6 +313,23 @@ class Bridge:
                     _LOGGER.debug("Colour update on %s failed: %s", vid, err)
             self._applied_color = target
 
+    def _whiteout_state(self, full: bool) -> str:
+        """Human-readable white-out mode state, for logging and the UI."""
+        if not self._config.white_out:
+            return "disabled"
+        prog = self._config.white_out_program
+        if self._whiteout_active:
+            return f"ACTIVE -> program {prog}"
+        scene = self._scene_for_program(prog)
+        if scene is None:
+            return f"armed, but program {prog} has no scene configured"
+        if full:
+            return "condition met (triggering)"
+        return (
+            f"armed (program {prog} = {scene!r}, fires when ch1-5 all >= "
+            f"{self._config.white_out_threshold})"
+        )
+
     async def _whiteout_worker(self) -> None:
         """Jump to the white-out program's scene while ch1-5 are all at full."""
         last_log = 0.0
@@ -319,25 +337,38 @@ class Bridge:
             await asyncio.sleep(0.02)  # 50 Hz
             # Guard: never let an unexpected error kill the worker.
             try:
-                if not self._config.white_out:
-                    if self._whiteout_active:
-                        await self._exit_whiteout()
-                    continue
+                enabled = self._config.white_out
+                full = self._whiteout_condition() if enabled else False
+                channels = [self._channels[c] for c in (1, 2, 3, 4, 5)]
 
-                full = self._whiteout_condition()
+                # Read out the white-out mode state whenever it changes (INFO,
+                # so it shows without -v).
+                state = self._whiteout_state(full)
+                if state != self._whiteout_last_state:
+                    self._whiteout_last_state = state
+                    _LOGGER.info(
+                        "White-out mode: %s | ch1-5=%s threshold=%s",
+                        state,
+                        channels,
+                        self._config.white_out_threshold,
+                    )
 
-                # Ground-truth logging (run with -v): what the bridge actually
-                # reads for ch1-5 and how it evaluates the trigger.
+                # Continuous ground-truth values once a second (DEBUG, -v).
                 now = time.monotonic()
-                if now - last_log >= 1.0:
+                if enabled and now - last_log >= 1.0:
                     last_log = now
                     _LOGGER.debug(
                         "white-out watch: ch1-5=%s threshold=%s condition=%s active=%s",
-                        [self._channels[c] for c in (1, 2, 3, 4, 5)],
+                        channels,
                         self._config.white_out_threshold,
                         full,
                         self._whiteout_active,
                     )
+
+                if not enabled:
+                    if self._whiteout_active:
+                        await self._exit_whiteout()
+                    continue
 
                 if full and not self._whiteout_active:
                     await self._enter_whiteout()
