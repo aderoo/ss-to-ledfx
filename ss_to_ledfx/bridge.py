@@ -161,6 +161,17 @@ class Bridge:
 
     def start(self) -> None:
         self._running = True
+        if self._config.white_out:
+            scene = self._scene_for_program(self._config.white_out_program)
+            _LOGGER.info(
+                "White-out ENABLED: program %d -> scene %r, threshold %d "
+                "(triggers when ch1-5 all >= threshold)",
+                self._config.white_out_program,
+                scene,
+                self._config.white_out_threshold,
+            )
+        else:
+            _LOGGER.info("White-out disabled")
         self._tasks = [
             asyncio.create_task(self._scene_worker(), name="scene_worker"),
             asyncio.create_task(self._brightness_worker(), name="brightness_worker"),
@@ -303,18 +314,37 @@ class Bridge:
 
     async def _whiteout_worker(self) -> None:
         """Jump to the white-out program's scene while ch1-5 are all at full."""
+        last_log = 0.0
         while self._running:
             await asyncio.sleep(0.02)  # 50 Hz
-            if not self._config.white_out:
-                if self._whiteout_active:
-                    await self._exit_whiteout()
-                continue
+            # Guard: never let an unexpected error kill the worker.
+            try:
+                if not self._config.white_out:
+                    if self._whiteout_active:
+                        await self._exit_whiteout()
+                    continue
 
-            full = self._whiteout_condition()
-            if full and not self._whiteout_active:
-                await self._enter_whiteout()
-            elif not full and self._whiteout_active:
-                await self._exit_whiteout()
+                full = self._whiteout_condition()
+
+                # Ground-truth logging (run with -v): what the bridge actually
+                # reads for ch1-5 and how it evaluates the trigger.
+                now = time.monotonic()
+                if now - last_log >= 1.0:
+                    last_log = now
+                    _LOGGER.debug(
+                        "white-out watch: ch1-5=%s threshold=%s condition=%s active=%s",
+                        [self._channels[c] for c in (1, 2, 3, 4, 5)],
+                        self._config.white_out_threshold,
+                        full,
+                        self._whiteout_active,
+                    )
+
+                if full and not self._whiteout_active:
+                    await self._enter_whiteout()
+                elif not full and self._whiteout_active:
+                    await self._exit_whiteout()
+            except Exception as err:  # noqa: BLE001 - keep the worker alive
+                _LOGGER.error("white-out worker error (continuing): %s", err)
 
     def _whiteout_condition(self) -> bool:
         """True when ch1 (dimmer) and ch2-5 (RGBW) are all at/above the level."""
